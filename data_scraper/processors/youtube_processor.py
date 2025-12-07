@@ -36,16 +36,17 @@ class YouTubeProcessor:
         if not os.path.exists(self.wav):
             AudioService.convert_m4a_to_wav(self.m4a, self.wav)
         else:
-            print("🔄 WAV exists → skip")
-
+            print("WAV exists → skip")
+        
         # 3) Transcribe
         if not os.path.exists(self.transcript_json):
             data = TranscriptionService.transcribe(self.wav)
             with open(self.transcript_json, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
         else:
-            print("📝 Transcript exists → skip")
+            print("Transcript exists → skip")
 
+        
         # 4) Chunk
         if not os.path.exists(self.chunks_wav):
             ChunkService.chunk_audio(
@@ -56,5 +57,6 @@ class YouTubeProcessor:
             )
         else:
             print("✂️ Chunks already exist → skip")
+            
 
-        print(f"✅ Finished → {self.folder}")
+        print(f"Finished → {self.folder}")

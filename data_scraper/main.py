@@ -3,7 +3,7 @@ from processors.youtube_processor import YouTubeProcessor
 
 
 if __name__ == "__main__":
-    df = pd.read_csv("video_list_tr.csv")
+    df = pd.read_csv("deneme.csv")
     df = df.drop_duplicates(subset=["url"]).reset_index(drop=True)
 
     urls = df["url"].tolist()
@@ -12,4 +12,4 @@ if __name__ == "__main__":
         try:
             YouTubeProcessor(url).run()
         except Exception as e:
-            print(f"❌ Error processing {url}: {e}")
+            print(f"Error processing {url}: {e}")
