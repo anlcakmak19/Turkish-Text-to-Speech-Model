@@ -29,12 +29,14 @@ class YouTubeProcessor:
         # 1) Download audio
         if not os.path.exists(self.m4a):
             AudioService.download_youtube_audio(self.url, self.folder)
+            print("original.m4a done")
         else:
-            print("🎬 original.m4a exists → skip")
+            print("original.m4a exists → skip")
 
         # 2) Convert
         if not os.path.exists(self.wav):
             AudioService.convert_m4a_to_wav(self.m4a, self.wav)
+            print("WAV done")
         else:
             print("WAV exists → skip")
         
@@ -43,6 +45,7 @@ class YouTubeProcessor:
             data = TranscriptionService.transcribe(self.wav)
             with open(self.transcript_json, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
+            print("Transcript done")
         else:
             print("Transcript exists → skip")
 
@@ -55,8 +58,9 @@ class YouTubeProcessor:
                 self.chunks_wav,
                 self.chunks_txt
             )
+            print("Chunks done")
         else:
-            print("✂️ Chunks already exist → skip")
+            print("Chunks already exist → skip")
             
 
         print(f"Finished → {self.folder}")

@@ -131,3 +131,4 @@ videos/
 .DS_Store
 Sıla_data/
 data_scraper/config/settings.py
+data_scraper/Sıla_data.zip
