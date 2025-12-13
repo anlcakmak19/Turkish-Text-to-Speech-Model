@@ -128,7 +128,9 @@ videos/
 *.m4a
 *.wav
 *.json
+*.zip
 .DS_Store
 Sıla_data/
+data_scraper/Taha_data
 data_scraper/config/settings.py
-data_scraper/Sıla_data.zip
+
