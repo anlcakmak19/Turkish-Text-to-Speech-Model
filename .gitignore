@@ -129,6 +129,7 @@ videos/
 *.wav
 *.json
 *.zip
+*.mp4
 .DS_Store
 Sıla_data/
 data_scraper/Taha_data
