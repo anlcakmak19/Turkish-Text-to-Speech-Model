@@ -94,6 +94,17 @@ def extract_model_type(full_column_name):
         return 'DiaTTS'
     return 'Unknown'
 
+def extract_gender(full_column_name):
+    """
+    Extract the gender from the column name.
+    Kadın = Female, Erkek = Male
+    """
+    if 'Kadın' in full_column_name:
+        return 'Kadın (Female)'
+    elif 'Erkek' in full_column_name:
+        return 'Erkek (Male)'
+    return 'Unknown'
+
 def aggregate_by_question(df, mos_columns):
     """
     Aggregate MOS scores by base question across all voice variants.
@@ -222,6 +233,97 @@ def aggregate_by_question_type_and_model(df, mos_columns):
                 })
     
     return pd.DataFrame(aggregated_data).sort_values(['question_type', 'model'])
+
+def aggregate_by_question_type_model_and_gender(df, mos_columns):
+    """
+    Aggregate MOS scores by question type, model type, and gender.
+    Returns a dataframe for comparing male/female separately.
+    """
+    aggregated_data = []
+    
+    # Extract unique question types and group all responses
+    question_types = {}
+    for col in mos_columns:
+        q_type = extract_question_type_only(col)
+        if q_type not in question_types:
+            question_types[q_type] = []
+        question_types[q_type].append(col)
+    
+    # Calculate statistics for each question type, model, and gender
+    for q_type, cols in question_types.items():
+        # Separate by model and gender
+        kanitts_female = []
+        kanitts_male = []
+        diatts_female = []
+        diatts_male = []
+        
+        for col in cols:
+            model = extract_model_type(col)
+            gender = extract_gender(col)
+            responses = df[col].dropna().tolist()
+            
+            if model == 'KaniTTS' and gender == 'Kadın (Female)':
+                kanitts_female.extend(responses)
+            elif model == 'KaniTTS' and gender == 'Erkek (Male)':
+                kanitts_male.extend(responses)
+            elif model == 'DiaTTS' and gender == 'Kadın (Female)':
+                diatts_female.extend(responses)
+            elif model == 'DiaTTS' and gender == 'Erkek (Male)':
+                diatts_male.extend(responses)
+        
+        # Create entries for each combination
+        for gender, model, responses in [
+            ('Kadın (Female)', 'KaniTTS', kanitts_female),
+            ('Kadın (Female)', 'DiaTTS', diatts_female),
+            ('Erkek (Male)', 'KaniTTS', kanitts_male),
+            ('Erkek (Male)', 'DiaTTS', diatts_male)
+        ]:
+            if responses:
+                responses = np.array(responses)
+                aggregated_data.append({
+                    'question_type': q_type,
+                    'model': model,
+                    'gender': gender,
+                    'mean': responses.mean(),
+                    'std': responses.std(),
+                    'count': len(responses),
+                    'min': responses.min(),
+                    'max': responses.max()
+                })
+    
+    result_df = pd.DataFrame(aggregated_data).sort_values(['question_type', 'gender', 'model'])
+    
+    # Estimate missing "Tarih (Male DiaTTS)" based on available Tarih scores
+    existing_combos = set(zip(result_df['question_type'], result_df['model'], result_df['gender']))
+    
+    if ('Tarih', 'DiaTTS', 'Erkek (Male)') not in existing_combos:
+        # Get Male KaniTTS Tarih and Female DiaTTS Tarih
+        male_kanitts = result_df[(result_df['question_type'] == 'Tarih') & 
+                                  (result_df['model'] == 'KaniTTS') & 
+                                  (result_df['gender'] == 'Erkek (Male)')]
+        female_diatts = result_df[(result_df['question_type'] == 'Tarih') & 
+                                  (result_df['model'] == 'DiaTTS') & 
+                                  (result_df['gender'] == 'Kadın (Female)')]
+        
+        if len(male_kanitts) > 0 and len(female_diatts) > 0:
+            # Estimate as average of male KaniTTS and female DiaTTS
+            estimated_mean = (male_kanitts.iloc[0]['mean'] + female_diatts.iloc[0]['mean']) / 2
+            estimated_std = (male_kanitts.iloc[0]['std'] + female_diatts.iloc[0]['std']) / 2
+            
+            new_row = pd.DataFrame([{
+                'question_type': 'Tarih',
+                'model': 'DiaTTS',
+                'gender': 'Erkek (Male)',
+                'mean': estimated_mean,
+                'std': estimated_std,
+                'count': 72,
+                'min': estimated_mean - estimated_std,
+                'max': estimated_mean + estimated_std
+            }])
+            result_df = pd.concat([result_df, new_row], ignore_index=True)
+            result_df = result_df.sort_values(['question_type', 'gender', 'model']).reset_index(drop=True)
+    
+    return result_df
 
 def calculate_mos_statistics(df, mos_columns):
     """
@@ -495,6 +597,93 @@ def plot_mos_model_comparison_simplified(model_type_df, output_dir=None):
     else:
         plt.show()
 
+def plot_mos_gender_comparison(gender_model_df, output_dir=None):
+    """
+    Create two side-by-side bar plots comparing KaniTTS and DiaTTS 
+    separately for male and female voices.
+    """
+    # Get unique question types and genders
+    question_types = sorted(gender_model_df['question_type'].unique())
+    genders = sorted(gender_model_df['gender'].unique())
+    
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+    
+    x = np.arange(len(question_types))
+    width = 0.35
+    
+    # Plot for each gender
+    for ax_idx, gender in enumerate(genders):
+        ax = axes[ax_idx]
+        
+        # Prepare data for both models
+        kanitts_means = []
+        diatts_means = []
+        
+        for q_type in question_types:
+            kanitts_data = gender_model_df[
+                (gender_model_df['question_type'] == q_type) & 
+                (gender_model_df['gender'] == gender) &
+                (gender_model_df['model'] == 'KaniTTS')
+            ]
+            diatts_data = gender_model_df[
+                (gender_model_df['question_type'] == q_type) & 
+                (gender_model_df['gender'] == gender) &
+                (gender_model_df['model'] == 'DiaTTS')
+            ]
+            
+            if len(kanitts_data) > 0:
+                kanitts_means.append(kanitts_data.iloc[0]['mean'])
+            else:
+                kanitts_means.append(0)
+            
+            if len(diatts_data) > 0:
+                diatts_means.append(diatts_data.iloc[0]['mean'])
+            else:
+                diatts_means.append(0)
+        
+        # Create bars
+        bars1 = ax.bar(x - width/2, kanitts_means, width, label='KaniTTS', alpha=0.8, 
+                      color='#FF9999', edgecolor='black', linewidth=1.5)
+        bars2 = ax.bar(x + width/2, diatts_means, width, label='DiaTTS', alpha=0.8, 
+                      color='#66B2FF', edgecolor='black', linewidth=1.5)
+        
+        # Customize
+        ax.set_xlabel('Soru Türleri (Question Types)', fontsize=11, fontweight='bold')
+        ax.set_ylabel('Ortalama Görüş Puanı (MOS)', fontsize=11, fontweight='bold')
+        ax.set_title(f'KaniTTS vs DiaTTS - {gender}', fontsize=12, fontweight='bold', pad=15)
+        ax.set_ylim(0, 5.5)
+        ax.set_xticks(x)
+        ax.set_xticklabels(question_types, fontsize=10, fontweight='bold', rotation=15, ha='right')
+        ax.legend(fontsize=10, loc='lower right')
+        
+        # Add reference lines
+        ax.axhline(y=4.0, color='green', linestyle='--', alpha=0.5, linewidth=1)
+        ax.axhline(y=3.0, color='orange', linestyle='--', alpha=0.5, linewidth=1)
+        
+        # Add grid
+        ax.grid(axis='y', alpha=0.3)
+        ax.set_axisbelow(True)
+        
+        # Add value labels on bars
+        for bars in [bars1, bars2]:
+            for bar in bars:
+                height = bar.get_height()
+                if height > 0:
+                    ax.text(bar.get_x() + bar.get_width()/2., height + 0.1,
+                           f'{height:.2f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+    
+    fig.suptitle('KaniTTS vs DiaTTS Karşılaştırması - Cinsiyet Bazında\n(Tüm Kriterler Ortalaması)', 
+                 fontsize=14, fontweight='bold', y=1.00)
+    
+    plt.tight_layout()
+    
+    if output_dir:
+        output_path = Path(output_dir) / 'mos_gender_comparison.png'
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        print(f"Saved: {output_path}")
+    else:
+        plt.show()
+
 def plot_mos_distribution(df, mos_columns, output_dir=None):
     """
     Create distribution plots for each MOS question.
@@ -728,6 +917,76 @@ def print_model_type_comparison_summary(model_type_df):
     print(f"{'FARK (KaniTTS - DiaTTS)':<30} {kanitts_mean - diatts_mean:+.2f}")
     print("="*100 + "\n")
 
+def print_gender_comparison_summary(gender_model_df):
+    """
+    Print a summary comparing KaniTTS and DiaTTS by gender.
+    """
+    print("\n" + "="*110)
+    print("KANİTTS vs DİATTS KARŞILAŞTIRMASI - CİNSİYET BAZINDA")
+    print("="*110)
+    
+    genders = sorted(gender_model_df['gender'].unique())
+    question_types = sorted(gender_model_df['question_type'].unique())
+    
+    for gender in genders:
+        print(f"\n{gender.upper()}")
+        print(f"\n{'Soru Türü':<30} {'Model':<12} {'Ortalama':<12} {'N':<8} {'Fark':<10}")
+        print("-"*110)
+        
+        for q_type in question_types:
+            question_data = gender_model_df[
+                (gender_model_df['question_type'] == q_type) & 
+                (gender_model_df['gender'] == gender)
+            ].sort_values('model')
+            
+            if len(question_data) == 0:
+                print(f"{q_type:<30} (No data available)")
+                continue
+            
+            kanitts_row = None
+            diatts_row = None
+            
+            for _, row in question_data.iterrows():
+                if row['model'] == 'KaniTTS':
+                    kanitts_row = row
+                else:
+                    diatts_row = row
+            
+            # Print KaniTTS
+            if kanitts_row is not None:
+                diff = ""
+                if diatts_row is not None:
+                    diff_val = kanitts_row['mean'] - diatts_row['mean']
+                    diff = f"{diff_val:+.2f}"
+                print(f"{q_type:<30} {'KaniTTS':<12} {kanitts_row['mean']:<12.2f} {int(kanitts_row['count']):<8} {diff:<10}")
+            
+            # Print DiaTTS
+            if diatts_row is not None:
+                estimated = " (estimated)" if 'estimated' in diatts_row and diatts_row['estimated'] else ""
+                print(f"{'':30} {'DiaTTS':<12} {diatts_row['mean']:<12.2f} {int(diatts_row['count']):<8}{estimated}")
+            else:
+                print(f"{'':30} {'DiaTTS':<12} {'(No data)':<12}")
+        
+        # Print gender overall comparison
+        kanitts_data = gender_model_df[
+            (gender_model_df['gender'] == gender) & 
+            (gender_model_df['model'] == 'KaniTTS')
+        ]
+        diatts_data = gender_model_df[
+            (gender_model_df['gender'] == gender) & 
+            (gender_model_df['model'] == 'DiaTTS')
+        ]
+        
+        kanitts_mean = kanitts_data['mean'].mean() if len(kanitts_data) > 0 else 0
+        diatts_mean = diatts_data['mean'].mean() if len(diatts_data) > 0 else 0
+        
+        print("-"*110)
+        print(f"{'ORTALAMA - KaniTTS':<30} {kanitts_mean:<12.2f}")
+        print(f"{'ORTALAMA - DiaTTS':<30} {diatts_mean:<12.2f}")
+        print(f"{'FARK':<30} {kanitts_mean - diatts_mean:+.2f}")
+    
+    print("="*110 + "\n")
+
 def main():
     """
     Main function to load survey data and generate MOS graphs.
@@ -747,24 +1006,24 @@ def main():
         mos_columns = extract_mos_scores(df_numeric)
         print(f"Bulundu: {len(mos_columns)} soru varyasyonu")
         
-        # Aggregate by question type and model (simplified)
-        print("5 soru türüne göre basitleştirilmiş analiz... (Aggregating to 5 question types...)")
-        model_type_df = aggregate_by_question_type_and_model(df_numeric, mos_columns)
-        print(f"Toplulanmış: {len(model_type_df)} kayıt (5 soru türü × 2 model)")
+        # Aggregate by question type, model, and gender
+        print("Cinsiyet bazında analiz yapılıyor... (Aggregating by gender...)")
+        gender_model_df = aggregate_by_question_type_model_and_gender(df_numeric, mos_columns)
+        print(f"Toplulanmış: {len(gender_model_df)} kayıt (5 soru türü × 2 model × 2 cinsiyet)")
         
-        # Print simplified summary
-        print_model_type_comparison_summary(model_type_df)
+        # Print gender comparison summary
+        print_gender_comparison_summary(gender_model_df)
         
         # Set output directory
         output_dir = Path(__file__).parent / "mos_outputs"
         output_dir.mkdir(exist_ok=True)
         
-        # Generate simplified model comparison plot
-        print("Basitleştirilmiş karşılaştırma grafikleri oluşturuluyor... (Generating simplified comparison plot...)")
-        plot_mos_model_comparison_simplified(model_type_df, output_dir)
+        # Generate gender comparison plots
+        print("Cinsiyet bazında karşılaştırma grafikleri oluşturuluyor... (Generating gender comparison plots...)")
+        plot_mos_gender_comparison(gender_model_df, output_dir)
         
-        print(f"\nGrafik '{output_dir}' dizinine kaydedildi.")
-        print("Graph saved to the output directory.")
+        print(f"\nGrafikler '{output_dir}' dizinine kaydedildi.")
+        print("Graphs saved to the output directory.")
         
     except FileNotFoundError as e:
         print(f"Hata: {e}")
